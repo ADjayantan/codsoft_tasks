@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Trained artifacts (regenerate by running the script)
+*.joblib
+
+# Dataset (download from Kaggle - see README.md)
+spam.csv
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
