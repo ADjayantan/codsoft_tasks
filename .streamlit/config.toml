@@ -1,0 +1,68 @@
+# Theme for the Spam SMS Detector.
+#
+# Colours are set here rather than with injected CSS so they apply consistently
+# to every element (widgets, charts, dataframes, badges) and survive upgrades.
+# greenColor / redColor matter most here: they are what st.badge and the
+# :green-badge[...] markdown shortcodes use for the HAM / SPAM verdicts.
+
+[theme]
+base = "light"
+primaryColor = "#4F46E5"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFC"
+codeBackgroundColor = "#F1F5F9"
+textColor = "#0F172A"
+linkColor = "#4F46E5"
+borderColor = "#E2E8F0"
+
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "8px"
+buttonRadius = "8px"
+
+font = "'Inter':https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+codeFontSize = "0.85rem"
+baseFontSize = 15
+headingFontWeights = [650, 650, 600, 600, 600, 600]
+
+# Semantic palette - the verdict badges read from these
+redColor = "#DC2626"
+orangeColor = "#EA580C"
+yellowColor = "#CA8A04"
+greenColor = "#16A34A"
+blueColor = "#2563EB"
+violetColor = "#7C3AED"
+grayColor = "#64748B"
+
+# Spam-first ordering: the first categorical colour lands on the spam series
+chartCategoricalColors = ["#4F46E5", "#DC2626", "#16A34A", "#EA580C", "#2563EB", "#7C3AED", "#64748B"]
+
+dataframeBorderColor = "#E2E8F0"
+dataframeHeaderBackgroundColor = "#F8FAFC"
+
+[theme.sidebar]
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#F1F5F9"
+borderColor = "#E2E8F0"
+
+[theme.dark]
+backgroundColor = "#0B1120"
+secondaryBackgroundColor = "#111C31"
+codeBackgroundColor = "#111C31"
+textColor = "#E2E8F0"
+borderColor = "#1E293B"
+primaryColor = "#818CF8"
+linkColor = "#818CF8"
+redColor = "#F87171"
+greenColor = "#4ADE80"
+orangeColor = "#FB923C"
+grayColor = "#94A3B8"
+chartCategoricalColors = ["#818CF8", "#F87171", "#4ADE80", "#FB923C", "#60A5FA", "#A78BFA", "#94A3B8"]
+dataframeHeaderBackgroundColor = "#111C31"
+dataframeBorderColor = "#1E293B"
+
+[theme.dark.sidebar]
+backgroundColor = "#080E1A"
+secondaryBackgroundColor = "#111C31"
+borderColor = "#1E293B"
