@@ -9,7 +9,8 @@ Pipeline
     load -> clean -> split -> TF-IDF vectorize -> train 3 models -> compare -> save best
 
 Models compared: Multinomial Naive Bayes, Logistic Regression, Linear SVC.
-The winner (highest F1 on the spam class) is persisted to spam_model.joblib.
+The winner is chosen by 5-fold cross-validated F1 on the TRAINING set (the test
+set is only used once, for the final report) and persisted to spam_model.joblib.
 
 Usage
 -----
@@ -38,7 +39,9 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.base import clone
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.pipeline import make_pipeline
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
 
@@ -52,6 +55,7 @@ CONFUSION_MATRIX_FILE = "confusion_matrix.png"
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
+CV_FOLDS = 5
 
 LABEL_MAP = {"ham": 0, "spam": 1}
 CLASS_NAMES = ["HAM", "SPAM"]
@@ -100,17 +104,24 @@ def load_dataset(path=DATA_FILE):
 # --------------------------------------------------------------------------- #
 
 def clean_text(text):
-    """Normalise a single SMS message down to lowercase alphabetic words.
+    """Normalise a single SMS message into lowercase words + placeholder tokens.
 
-    Order matters: URLs are stripped before punctuation, otherwise 'http://x.com'
-    would decay into the meaningless tokens 'http' and 'x com'.
+    Spam signals like URLs, phone numbers, prize amounts and currency symbols are
+    REPLACED with placeholder words instead of deleted -- "call 09061701461 to claim
+    £900" becomes "call longnumtoken to claim currencytoken numtoken". Deleting them
+    throws away some of the strongest spam evidence in the dataset.
+
+    Order matters: URLs/emails go first, otherwise 'http://x.com' would decay into
+    the meaningless tokens 'http' and 'x com'.
     """
     text = str(text).lower()
-    text = re.sub(r"http\S+|www\.\S+", " ", text)   # URLs
-    text = re.sub(r"\S+@\S+", " ", text)            # email addresses
-    text = re.sub(r"\d+", " ", text)                # digits (phone numbers, prize amounts)
-    text = re.sub(r"[^a-z\s]", " ", text)           # punctuation and leftover symbols
-    text = re.sub(r"\s+", " ", text)                # collapse runs of whitespace
+    text = re.sub(r"http\S+|www\.\S+", " urltoken ", text)     # URLs
+    text = re.sub(r"\S+@\S+", " emailtoken ", text)             # email addresses
+    text = re.sub(r"[£$€]", " currencytoken ", text)            # £ $ €
+    text = re.sub(r"\d{5,}", " longnumtoken ", text)            # phone / short codes
+    text = re.sub(r"\d+", " numtoken ", text)                   # any other number
+    text = re.sub(r"[^a-z\s]", " ", text)                       # punctuation, symbols
+    text = re.sub(r"\s+", " ", text)                            # collapse whitespace
     return text.strip()
 
 
@@ -150,18 +161,27 @@ def split_data(df):
     return X_train, X_test, y_train, y_test
 
 
+def build_vectorizer():
+    """TF-IDF over unigrams + bigrams.
+
+    No stop-word removal on purpose: scikit-learn's English stop list contains
+    "call", "now", "please", "get" -- exactly the words spam is written in. With
+    stop words removed, the bigram "call now" can never even exist.
+    """
+    return TfidfVectorizer(
+        ngram_range=(1, 2),   # unigrams + bigrams ("call now", "claim prize")
+        min_df=2,             # ignore terms that appear in only one message
+        sublinear_tf=True,    # log-scale term counts so "free free free" != 3x
+    )
+
+
 def vectorize(X_train, X_test):
     """Turn text into TF-IDF vectors.
 
     Fitted on the TRAINING set only -- fitting on everything would leak test-set
     vocabulary and IDF statistics into training and inflate the scores.
     """
-    vectorizer = TfidfVectorizer(
-        stop_words="english",
-        ngram_range=(1, 2),   # unigrams + bigrams ("call now", "free entry")
-        min_df=2,             # ignore terms that appear in only one message
-        max_features=5000,
-    )
+    vectorizer = build_vectorizer()
     X_train_vec = vectorizer.fit_transform(X_train)
     X_test_vec = vectorizer.transform(X_test)
 
@@ -176,7 +196,7 @@ def vectorize(X_train, X_test):
 def build_models():
     """The three classifiers we are comparing."""
     return {
-        "Multinomial Naive Bayes": MultinomialNB(),
+        "Multinomial Naive Bayes": MultinomialNB(alpha=0.1),
         "Logistic Regression": LogisticRegression(
             class_weight="balanced", max_iter=1000, random_state=RANDOM_STATE
         ),
@@ -215,21 +235,41 @@ def evaluate_model(name, model, X_train_vec, y_train, X_test_vec, y_test):
     return scores
 
 
-def compare_models(X_train_vec, y_train, X_test_vec, y_test):
-    """Train every model, print a summary table, return all results."""
+def cross_validate_models(X_train, y_train):
+    """5-fold stratified CV F1 on the training set, one score per model.
+
+    Each fold re-fits its own vectorizer inside a pipeline, so no fold ever sees
+    the vocabulary of the fold it's being scored on. This -- not the test set --
+    is what picks the winner; picking by test score would quietly overfit to it.
+    """
+    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    cv_scores = {}
+    for name, model in build_models().items():
+        pipeline = make_pipeline(build_vectorizer(), clone(model))
+        scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring="f1")
+        cv_scores[name] = (scores.mean(), scores.std())
+    return cv_scores
+
+
+def compare_models(X_train, y_train, X_train_vec, X_test_vec, y_test):
+    """CV every model, evaluate each once on test, print a summary table."""
+    cv_scores = cross_validate_models(X_train, y_train)
+
     results = []
     for name, model in build_models().items():
-        results.append(
-            evaluate_model(name, model, X_train_vec, y_train, X_test_vec, y_test)
-        )
+        r = evaluate_model(name, model, X_train_vec, y_train, X_test_vec, y_test)
+        r["cv_f1"], r["cv_std"] = cv_scores[name]
+        results.append(r)
 
-    print("=" * 66)
+    print("=" * 74)
     print("  SUMMARY (metrics for the SPAM class)")
-    print("=" * 66)
-    print("  {:<26}{:>8}{:>9}{:>9}{:>9}".format("Model", "Acc", "Prec", "Recall", "F1"))
+    print("=" * 74)
+    print("  {:<26}{:>14}{:>8}{:>8}{:>8}{:>8}".format(
+        "Model", "CV F1 (5-fold)", "Acc", "Prec", "Recall", "F1"))
     for r in results:
-        print("  {:<26}{:>8.4f}{:>9.4f}{:>9.4f}{:>9.4f}".format(
-            r["name"], r["accuracy"], r["precision"], r["recall"], r["f1"]))
+        print("  {:<26}{:>8.4f}±{:.3f}{:>8.4f}{:>8.4f}{:>8.4f}{:>8.4f}".format(
+            r["name"], r["cv_f1"], r["cv_std"],
+            r["accuracy"], r["precision"], r["recall"], r["f1"]))
     print()
     return results
 
@@ -392,10 +432,11 @@ def main():
     X_train, X_test, y_train, y_test = split_data(df)
     X_train_vec, X_test_vec, vectorizer = vectorize(X_train, X_test)
 
-    results = compare_models(X_train_vec, y_train, X_test_vec, y_test)
+    results = compare_models(X_train, y_train, X_train_vec, X_test_vec, y_test)
 
-    best = max(results, key=lambda r: r["f1"])
-    print("[best] {}  (F1 = {:.4f})\n".format(best["name"], best["f1"]))
+    best = max(results, key=lambda r: r["cv_f1"])
+    print("[best] {}  (CV F1 = {:.4f}, test F1 = {:.4f})\n".format(
+        best["name"], best["cv_f1"], best["f1"]))
 
     plot_confusion_matrix(y_test, best["y_pred"], best["name"])
     save_best_model(best, vectorizer)
